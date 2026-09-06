@@ -61,30 +61,42 @@ jobs:
           rm -rf project
           mkdir project
           unzip -q runrunrun-source-public.zip -d project
+          cp "$RUNNER_TEMP/runrunrun-release.jks" "$GITHUB_WORKSPACE/project/runrunrun-release.jks"
 
-      - name: Build unsigned release APK
+      - name: Build signed release APK
         shell: bash
         working-directory: project
-        run: gradle --no-daemon --stacktrace clean assembleRelease
-
-      - name: Sign release APK
-        shell: bash
         env:
+          KEYSTORE_FILE: ${{ github.workspace }}/project/runrunrun-release.jks
+          STORE_FILE: ${{ github.workspace }}/project/runrunrun-release.jks
+          RELEASE_STORE_FILE: ${{ github.workspace }}/project/runrunrun-release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.RUNRUNRUN_STORE_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.RUNRUNRUN_STORE_PASSWORD }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RUNRUNRUN_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.RUNRUNRUN_KEY_ALIAS }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RUNRUNRUN_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.RUNRUNRUN_KEY_PASSWORD }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RUNRUNRUN_KEY_PASSWORD }}
         run: |
-          UNSIGNED_APK="project/app/build/outputs/apk/release/app-release-unsigned.apk"
-          test -f "$UNSIGNED_APK" || { find project/app/build/outputs -maxdepth 5 -type f -print; exit 1; }
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 "$UNSIGNED_APK" runrunrun-release-aligned.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
-            --ks "$RUNNER_TEMP/runrunrun-release.jks" \
-            --ks-key-alias "$KEY_ALIAS" \
-            --ks-pass "pass:$STORE_PASSWORD" \
-            --key-pass "pass:$KEY_PASSWORD" \
-            --out runrunrun-release.apk \
-            runrunrun-release-aligned.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs runrunrun-release.apk
+          gradle --no-daemon --stacktrace clean assembleRelease \
+            -PKEYSTORE_FILE="$KEYSTORE_FILE" \
+            -PSTORE_FILE="$STORE_FILE" \
+            -PRELEASE_STORE_FILE="$RELEASE_STORE_FILE" \
+            -PKEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" \
+            -PSTORE_PASSWORD="$STORE_PASSWORD" \
+            -PRELEASE_STORE_PASSWORD="$RELEASE_STORE_PASSWORD" \
+            -PKEY_ALIAS="$KEY_ALIAS" \
+            -PRELEASE_KEY_ALIAS="$RELEASE_KEY_ALIAS" \
+            -PKEY_PASSWORD="$KEY_PASSWORD" \
+            -PRELEASE_KEY_PASSWORD="$RELEASE_KEY_PASSWORD"
+
+      - name: Verify and prepare APK
+        shell: bash
+        run: |
+          APK="$(find project/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$APK" && test -f "$APK" || { echo "Release APK not found"; find project/app/build/outputs -maxdepth 5 -type f -print || true; exit 1; }
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          cp "$APK" runrunrun-release.apk
           sha256sum runrunrun-release.apk | tee runrunrun-release.apk.sha256
 
       - name: Upload signed release APK
